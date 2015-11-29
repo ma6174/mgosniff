@@ -19,12 +19,16 @@ func ReadInt32(r io.Reader) (n int32) {
 	return
 }
 
-func ReadInt64(r io.Reader) (n int64) {
+func ReadInt64(r io.Reader) *int64 {
+	var n int64
 	err := binary.Read(r, binary.LittleEndian, &n)
 	if err != nil {
+		if err == io.EOF {
+			return nil
+		}
 		panic(err)
 	}
-	return
+	return &n
 }
 
 func ReadCString(r io.Reader) string {

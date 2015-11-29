@@ -14,6 +14,7 @@ import (
 var (
 	listenAddr = flag.String("l", ":7017", "listen port")
 	dstAddr    = flag.String("d", "127.0.0.1:27017", "proxy to dest addr")
+	isShowVer  = flag.Bool("v", false, "show version")
 	bufferPool = sync.Pool{
 		New: func() interface{} {
 			return make([]byte, 4096)
@@ -32,6 +33,8 @@ const (
 	OP_DELETE       = 2006
 	OP_KILL_CURSORS = 2007
 )
+
+const version = "0.1"
 
 type MsgHeader struct {
 	MessageLength int32
@@ -64,8 +67,8 @@ func (self *Parser) Write(p []byte) (n int, err error) {
 }
 
 func (self *Parser) Close() {
-	self.Pw.Close()
 	self.isPwClosed = true
+	self.Pw.Close()
 }
 
 func (self *Parser) ParseQuery(header MsgHeader, r io.Reader) {
@@ -75,7 +78,7 @@ func (self *Parser) ParseQuery(header MsgHeader, r io.Reader) {
 	numberToReturn := ReadInt32(r)
 	query := ToJson(ReadDocument(r))
 	selector := ToJson(ReadDocument(r))
-	fmt.Printf("%s [%s] QUERY id:%d ns:%s skip:%d ret:%d flag:%b query:%v sel:%v\n",
+	fmt.Printf("%s [%s] QUERY id:%d coll:%s toskip:%d toret:%d flag:%b query:%v sel:%v\n",
 		currentTime(),
 		self.RemoteAddr,
 		header.RequestID,
@@ -90,45 +93,58 @@ func (self *Parser) ParseQuery(header MsgHeader, r io.Reader) {
 
 func (self *Parser) ParseInsert(header MsgHeader, r io.Reader) {
 	flag := ReadInt32(r)
-	ns := ReadCString(r)
-	docs := ToJson(ReadDocuments(r))
-	fmt.Printf("%s [%s] INSERT id:%d ns:%s flag:%b docs:%v\n",
-		currentTime(), self.RemoteAddr, header.RequestID, ns, flag, docs)
+	fullCollectionName := ReadCString(r)
+	docs := ReadDocuments(r)
+	var docsStr string
+	if len(docs) == 1 {
+		docsStr = ToJson(docs[0])
+	} else {
+		docsStr = ToJson(docs)
+	}
+	fmt.Printf("%s [%s] INSERT id:%d coll:%s flag:%b docs:%v\n",
+		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, flag, docsStr)
 }
 
 func (self *Parser) ParseUpdate(header MsgHeader, r io.Reader) {
 	_ = ReadInt32(r)
-	ns := ReadCString(r)
+	fullCollectionName := ReadCString(r)
 	flag := ReadInt32(r)
 	selector := ToJson(ReadDocument(r))
 	update := ToJson(ReadDocument(r))
-	fmt.Printf("%s [%s] UPDATE id:%d ns:%s flag:%b sel:%v update:%v\n",
-		currentTime(), self.RemoteAddr, header.RequestID, ns, flag, selector, update)
+	fmt.Printf("%s [%s] UPDATE id:%d coll:%s flag:%b sel:%v update:%v\n",
+		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, flag, selector, update)
 }
 
 func (self *Parser) ParseGetMore(header MsgHeader, r io.Reader) {
 	_ = ReadInt32(r)
-	ns := ReadCString(r)
+	fullCollectionName := ReadCString(r)
 	numberToReturn := ReadInt32(r)
 	cursorID := ReadInt64(r)
-	fmt.Printf("%s [%s] GETMORE id:%d ns:%s ret:%d curID:%d\n",
-		currentTime(), self.RemoteAddr, header.RequestID, ns, numberToReturn, cursorID)
+	fmt.Printf("%s [%s] GETMORE id:%d coll:%s toret:%d curID:%d\n",
+		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, numberToReturn, cursorID)
 }
 
 func (self *Parser) ParseDelete(header MsgHeader, r io.Reader) {
 	_ = ReadInt32(r)
-	ns := ReadCString(r)
+	fullCollectionName := ReadCString(r)
 	flag := ReadInt32(r)
 	selector := ToJson(ReadDocument(r))
-	fmt.Printf("%s [%s] DELETE id:%d ns:%s flag:%b sel:%v \n",
-		currentTime(), self.RemoteAddr, header.RequestID, ns, flag, selector)
+	fmt.Printf("%s [%s] DELETE id:%d coll:%s flag:%b sel:%v \n",
+		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, flag, selector)
 }
 
 func (self *Parser) ParseKillCursors(header MsgHeader, r io.Reader) {
 	_ = ReadInt32(r)
 	numberOfCursorIDs := ReadInt32(r)
-	// todo array
-	cursorIDs := ReadInt64(r)
+	var cursorIDs []int64
+	for {
+		n := ReadInt64(r)
+		if n != nil {
+			cursorIDs = append(cursorIDs, *n)
+			continue
+		}
+		break
+	}
 	fmt.Printf("%s [%s] KILLCURSORS id:%d numCurID:%d curIDs:%d\n",
 		currentTime(), self.RemoteAddr, header.RequestID, numberOfCursorIDs, cursorIDs)
 }
@@ -138,8 +154,14 @@ func (self *Parser) ParseReply(header MsgHeader, r io.Reader) {
 	cursorID := ReadInt64(r)
 	startingFrom := ReadInt32(r)
 	numberReturned := ReadInt32(r)
-	documents := ToJson(ReadDocuments(r))
-	fmt.Printf("%s [%s] REPLY to:%d flag:%b curID:%d from:%d ret:%d docs:%v\n",
+	docs := ReadDocuments(r)
+	var docsStr string
+	if len(docs) == 1 {
+		docsStr = ToJson(docs[0])
+	} else {
+		docsStr = ToJson(docs)
+	}
+	fmt.Printf("%s [%s] REPLY to:%d flag:%b curID:%d from:%d reted:%d docs:%v\n",
 		currentTime(),
 		self.RemoteAddr,
 		header.ResponseTo,
@@ -147,7 +169,7 @@ func (self *Parser) ParseReply(header MsgHeader, r io.Reader) {
 		cursorID,
 		startingFrom,
 		numberReturned,
-		documents,
+		docsStr,
 	)
 }
 
@@ -162,10 +184,9 @@ func (self *Parser) ParseReserved(header MsgHeader, r io.Reader) {
 func (self *Parser) Parse(r *io.PipeReader) {
 	defer func() {
 		if e := recover(); e != nil {
-			log.Println("parser failed, painc:", e)
+			log.Printf("[%s] parser failed, painc: %v\n", self.RemoteAddr, e)
 			self.isPwClosed = true
 			self.Pw.Close()
-			r.Close()
 		}
 	}()
 	for {
@@ -173,7 +194,7 @@ func (self *Parser) Parse(r *io.PipeReader) {
 		err := binary.Read(r, binary.LittleEndian, &header)
 		if err != nil {
 			if err != io.EOF {
-				log.Println(err)
+				log.Printf("[%s] unexpected error:%v\n", self.RemoteAddr, err)
 			}
 			break
 		}
@@ -202,10 +223,10 @@ func (self *Parser) Parse(r *io.PipeReader) {
 }
 
 func handleConn(conn net.Conn) {
-	log.Println("new client connected from:", conn.RemoteAddr())
+	log.Printf("[%s] new client connected\n", conn.RemoteAddr())
 	dst, err := net.Dial("tcp", *dstAddr)
 	if err != nil {
-		log.Println(err)
+		log.Printf("[%s] unexpected err:%v, close connection:%s\n", conn.RemoteAddr(), err, conn.RemoteAddr())
 		conn.Close()
 		return
 	}
@@ -220,21 +241,22 @@ func handleConn(conn net.Conn) {
 		parser.Close()
 		parser2.Close()
 	}
-	cp := func(dst io.Writer, src io.Reader) {
+	cp := func(dst io.Writer, src io.Reader, srcAddr string) {
 		p := bufferPool.Get().([]byte)
 		for {
 			n, err := src.Read(p)
 			if err != nil {
 				if err != io.EOF && !isClosedErr(err) {
-					log.Println(err)
+					log.Printf("[%s] unexpected error:%v\n", conn.RemoteAddr(), err)
 				}
+				log.Printf("[%s] close connection:%s\n", conn.RemoteAddr(), srcAddr)
 				clean()
 				break
 			}
 			_, err = dst.Write(p[:n])
 			if err != nil {
 				if err != io.EOF && !isClosedErr(err) {
-					log.Println(err)
+					log.Printf("[%s] unexpected error:%v\n", conn.RemoteAddr(), err)
 				}
 				clean()
 				break
@@ -242,22 +264,26 @@ func handleConn(conn net.Conn) {
 		}
 		bufferPool.Put(p)
 	}
-	go cp(conn, teeReader2)
-	cp(dst, teeReader)
+	go cp(conn, teeReader2, dst.RemoteAddr().String())
+	cp(dst, teeReader, conn.RemoteAddr().String())
 }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
-	log.Printf("%s listen at :%s and proxy to %s\n", os.Args[0], *listenAddr, *dstAddr)
+	if *isShowVer {
+		fmt.Printf("version: %s\n", version)
+		os.Exit(0)
+	}
+	log.Printf("%s listen at %s, proxy to mongodb server %s\n", os.Args[0], *listenAddr, *dstAddr)
 	ln, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("listen failed:", err)
 	}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Println(err)
+			log.Println("accept connection failed:", err)
 			continue
 		}
 		go handleConn(conn)
