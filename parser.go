@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -23,15 +24,19 @@ var (
 )
 
 const (
-	OP_REPLY        = 1
-	OP_MSG          = 1000
-	OP_UPDATE       = 2001
-	OP_INSERT       = 2002
-	OP_RESERVED     = 2003
-	OP_QUERY        = 2004
-	OP_GET_MORE     = 2005
-	OP_DELETE       = 2006
-	OP_KILL_CURSORS = 2007
+	OP_REPLY                    = 1
+	OP_MSG                      = 1000
+	OP_UPDATE                   = 2001
+	OP_INSERT                   = 2002
+	OP_RESERVED                 = 2003
+	OP_QUERY                    = 2004
+	OP_GET_MORE                 = 2005
+	OP_DELETE                   = 2006
+	OP_KILL_CURSORS             = 2007
+	OP_COMMAND_DEPRECATED       = 2008
+	OP_COMMAND_REPLY_DEPRECATED = 2009
+	OP_COMMAND                  = 2010
+	OP_COMMAND_REPLY            = 2011
 )
 
 const version = "0.1"
@@ -181,6 +186,43 @@ func (self *Parser) ParseReserved(header MsgHeader, r io.Reader) {
 	fmt.Printf("%s [%s] RESERVED header:%v data:%s\n", currentTime(), header.RequestID, header)
 }
 
+func (self *Parser) ParseCommandDeprecated(header MsgHeader, r io.Reader) {
+	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	// TODO: no document, current not understand
+	_, err := io.Copy(ioutil.Discard, r)
+	if err != nil {
+		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
+		return
+	}
+}
+func (self *Parser) ParseCommandReplyDeprecated(header MsgHeader, r io.Reader) {
+	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	// TODO: no document, current not understand
+	_, err := io.Copy(ioutil.Discard, r)
+	if err != nil {
+		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
+		return
+	}
+}
+func (self *Parser) ParseCommand(header MsgHeader, r io.Reader) {
+	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	// TODO: no document, current not understand
+	_, err := io.Copy(ioutil.Discard, r)
+	if err != nil {
+		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
+		return
+	}
+}
+func (self *Parser) ParseCommandReply(header MsgHeader, r io.Reader) {
+	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	// TODO: no document, current not understand
+	_, err := io.Copy(ioutil.Discard, r)
+	if err != nil {
+		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
+		return
+	}
+}
+
 func (self *Parser) Parse(r *io.PipeReader) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -218,6 +260,21 @@ func (self *Parser) Parse(r *io.PipeReader) {
 			self.ParseKillCursors(header, rd)
 		case OP_RESERVED:
 			self.ParseReserved(header, rd)
+		case OP_COMMAND_DEPRECATED:
+			self.ParseCommandDeprecated(header, rd)
+		case OP_COMMAND_REPLY_DEPRECATED:
+			self.ParseCommandReplyDeprecated(header, rd)
+		case OP_COMMAND:
+			self.ParseCommand(header, rd)
+		case OP_COMMAND_REPLY:
+			self.ParseCommandReply(header, rd)
+		default:
+			log.Printf("[%s] known OpCode: %d", self.RemoteAddr, header.OpCode)
+			_, err = io.Copy(ioutil.Discard, rd)
+			if err != nil {
+				log.Printf("[%s] read failed: %v", self.RemoteAddr, err)
+				break
+			}
 		}
 	}
 }
