@@ -39,7 +39,7 @@ const (
 	OP_COMMAND_REPLY            = 2011
 )
 
-const version = "0.1"
+const version = "0.2"
 
 type MsgHeader struct {
 	MessageLength int32
@@ -77,10 +77,10 @@ func (self *Parser) Close() {
 }
 
 func (self *Parser) ParseQuery(header MsgHeader, r io.Reader) {
-	flag := ReadInt32(r)
+	flag := MustReadInt32(r)
 	fullCollectionName := ReadCString(r)
-	numberToSkip := ReadInt32(r)
-	numberToReturn := ReadInt32(r)
+	numberToSkip := MustReadInt32(r)
+	numberToReturn := MustReadInt32(r)
 	query := ToJson(ReadDocument(r))
 	selector := ToJson(ReadDocument(r))
 	fmt.Printf("%s [%s] QUERY id:%d coll:%s toskip:%d toret:%d flag:%b query:%v sel:%v\n",
@@ -97,7 +97,7 @@ func (self *Parser) ParseQuery(header MsgHeader, r io.Reader) {
 }
 
 func (self *Parser) ParseInsert(header MsgHeader, r io.Reader) {
-	flag := ReadInt32(r)
+	flag := MustReadInt32(r)
 	fullCollectionName := ReadCString(r)
 	docs := ReadDocuments(r)
 	var docsStr string
@@ -111,9 +111,9 @@ func (self *Parser) ParseInsert(header MsgHeader, r io.Reader) {
 }
 
 func (self *Parser) ParseUpdate(header MsgHeader, r io.Reader) {
-	_ = ReadInt32(r)
+	_ = MustReadInt32(r)
 	fullCollectionName := ReadCString(r)
-	flag := ReadInt32(r)
+	flag := MustReadInt32(r)
 	selector := ToJson(ReadDocument(r))
 	update := ToJson(ReadDocument(r))
 	fmt.Printf("%s [%s] UPDATE id:%d coll:%s flag:%b sel:%v update:%v\n",
@@ -121,26 +121,26 @@ func (self *Parser) ParseUpdate(header MsgHeader, r io.Reader) {
 }
 
 func (self *Parser) ParseGetMore(header MsgHeader, r io.Reader) {
-	_ = ReadInt32(r)
+	_ = MustReadInt32(r)
 	fullCollectionName := ReadCString(r)
-	numberToReturn := ReadInt32(r)
+	numberToReturn := MustReadInt32(r)
 	cursorID := ReadInt64(r)
 	fmt.Printf("%s [%s] GETMORE id:%d coll:%s toret:%d curID:%d\n",
 		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, numberToReturn, cursorID)
 }
 
 func (self *Parser) ParseDelete(header MsgHeader, r io.Reader) {
-	_ = ReadInt32(r)
+	_ = MustReadInt32(r)
 	fullCollectionName := ReadCString(r)
-	flag := ReadInt32(r)
+	flag := MustReadInt32(r)
 	selector := ToJson(ReadDocument(r))
 	fmt.Printf("%s [%s] DELETE id:%d coll:%s flag:%b sel:%v \n",
 		currentTime(), self.RemoteAddr, header.RequestID, fullCollectionName, flag, selector)
 }
 
 func (self *Parser) ParseKillCursors(header MsgHeader, r io.Reader) {
-	_ = ReadInt32(r)
-	numberOfCursorIDs := ReadInt32(r)
+	_ = MustReadInt32(r)
+	numberOfCursorIDs := MustReadInt32(r)
 	var cursorIDs []int64
 	for {
 		n := ReadInt64(r)
@@ -155,10 +155,10 @@ func (self *Parser) ParseKillCursors(header MsgHeader, r io.Reader) {
 }
 
 func (self *Parser) ParseReply(header MsgHeader, r io.Reader) {
-	flag := ReadInt32(r)
+	flag := MustReadInt32(r)
 	cursorID := ReadInt64(r)
-	startingFrom := ReadInt32(r)
-	numberReturned := ReadInt32(r)
+	startingFrom := MustReadInt32(r)
+	numberReturned := MustReadInt32(r)
 	docs := ReadDocuments(r)
 	var docsStr string
 	if len(docs) == 1 {
@@ -205,22 +205,28 @@ func (self *Parser) ParseCommandReplyDeprecated(header MsgHeader, r io.Reader) {
 	}
 }
 func (self *Parser) ParseCommand(header MsgHeader, r io.Reader) {
-	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
-	// TODO: no document, current not understand
-	_, err := io.Copy(ioutil.Discard, r)
-	if err != nil {
-		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
-		return
-	}
+	database := ReadCString(r)
+	commandName := ReadCString(r)
+	metadata := ToJson(ReadDocument(r))
+	commandArgs := ToJson(ReadDocument(r))
+	inputDocs := ToJson(ReadDocuments(r))
+	fmt.Printf("%s [%s] COMMAND id:%v db:%v meta:%v cmd:%v args:%v docs %v\n",
+		currentTime(),
+		self.RemoteAddr,
+		header.RequestID,
+		database,
+		metadata,
+		commandName,
+		commandArgs,
+		inputDocs,
+	)
 }
 func (self *Parser) ParseCommandReply(header MsgHeader, r io.Reader) {
-	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
-	// TODO: no document, current not understand
-	_, err := io.Copy(ioutil.Discard, r)
-	if err != nil {
-		fmt.Printf("[%s] read failed: %v", self.RemoteAddr, err)
-		return
-	}
+	metadata := ToJson(ReadDocument(r))
+	commandReply := ToJson(ReadDocument(r))
+	outputDocs := ToJson(ReadDocument(r))
+	fmt.Printf("%s [%s] COMMANDREPLY to:%d id:%v meta:%v cmdReply:%v outputDocs:%v\n",
+		currentTime(), self.RemoteAddr, header.ResponseTo, header.RequestID, metadata, commandReply, outputDocs)
 }
 
 func (self *Parser) Parse(r *io.PipeReader) {

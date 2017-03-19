@@ -8,14 +8,18 @@ import (
 	"net"
 	"time"
 
-	"github.com/sbunce/bson"
+	"gopkg.in/mgo.v2/bson"
 )
 
-func ReadInt32(r io.Reader) (n int32) {
+func MustReadInt32(r io.Reader) (n int32) {
 	err := binary.Read(r, binary.LittleEndian, &n)
 	if err != nil {
 		panic(err)
 	}
+	return
+}
+func ReadInt32(r io.Reader) (n int32, err error) {
+	err = binary.Read(r, binary.LittleEndian, &n)
 	return
 }
 
@@ -47,18 +51,33 @@ func ReadCString(r io.Reader) string {
 	return string(b)
 }
 
-func ReadDocument(r io.Reader) *bson.Map {
-	m, err := bson.ReadMap(r)
+func ReadOne(r io.Reader) []byte {
+	docLen, err := ReadInt32(r)
 	if err != nil {
 		if err == io.EOF {
 			return nil
 		}
 		panic(err)
 	}
-	return &m
+	buf := make([]byte, int(docLen))
+	binary.LittleEndian.PutUint32(buf, uint32(docLen))
+	if _, err := io.ReadFull(r, buf[4:]); err != nil {
+		panic(err)
+	}
+	return buf
 }
 
-func ReadDocuments(r io.Reader) (ms []*bson.Map) {
+func ReadDocument(r io.Reader) (m bson.M) {
+	if one := ReadOne(r); one != nil {
+		err := bson.Unmarshal(one, &m)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return m
+}
+
+func ReadDocuments(r io.Reader) (ms []bson.M) {
 	for {
 		m := ReadDocument(r)
 		if m == nil {
