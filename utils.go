@@ -35,6 +35,18 @@ func ReadInt64(r io.Reader) *int64 {
 	return &n
 }
 
+func ReadBytes(r io.Reader, n int) []byte {
+	b := make([]byte, n)
+	_, err := r.Read(b)
+	if err != nil {
+		if err == io.EOF {
+			return nil
+		}
+		panic(err)
+	}
+	return b
+}
+
 func ReadCString(r io.Reader) string {
 	var b []byte
 	var one = make([]byte, 1)

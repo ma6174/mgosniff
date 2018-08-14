@@ -37,6 +37,7 @@ const (
 	OP_COMMAND_REPLY_DEPRECATED = 2009
 	OP_COMMAND                  = 2010
 	OP_COMMAND_REPLY            = 2011
+	OP_MSG_NEW                  = 2013
 )
 
 const version = "0.2"
@@ -221,6 +222,50 @@ func (self *Parser) ParseCommand(header MsgHeader, r io.Reader) {
 		inputDocs,
 	)
 }
+
+func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
+	flags := ToJson(MustReadInt32(r))
+	fmt.Printf("%s [%s] MSG start id:%v flags: %v\n",
+		currentTime(),
+		self.RemoteAddr,
+		header.RequestID,
+		flags,
+	)
+	for {
+		t := ReadBytes(r, 1)
+		if t == nil {
+			fmt.Printf("%s [%s] MSG end id:%v \n",
+				currentTime(),
+				self.RemoteAddr,
+				header.RequestID,
+			)
+			break
+		}
+		switch t[0] {
+		case 0: // body
+			body := ToJson(ReadDocument(r))
+			fmt.Printf("%s [%s] MSG id:%v type:0 body: %v\n",
+				currentTime(),
+				self.RemoteAddr,
+				header.RequestID,
+				body,
+			)
+		case 1:
+			sectionSize := MustReadInt32(r)
+			r1 := io.LimitReader(r, int64(sectionSize))
+			documentSequenceIdentifier := ReadCString(r1)
+			objects := ToJson(ReadDocuments(r1))
+			fmt.Printf("%s [%s] MSG id:%v type:1 documentSequenceIdentifier: %v objects:%v\n",
+				currentTime(),
+				self.RemoteAddr,
+				header.RequestID,
+				documentSequenceIdentifier,
+				objects,
+			)
+		}
+	}
+}
+
 func (self *Parser) ParseCommandReply(header MsgHeader, r io.Reader) {
 	metadata := ToJson(ReadDocument(r))
 	commandReply := ToJson(ReadDocument(r))
@@ -274,8 +319,10 @@ func (self *Parser) Parse(r *io.PipeReader) {
 			self.ParseCommand(header, rd)
 		case OP_COMMAND_REPLY:
 			self.ParseCommandReply(header, rd)
+		case OP_MSG_NEW:
+			self.ParseMsgNew(header, rd)
 		default:
-			log.Printf("[%s] known OpCode: %d", self.RemoteAddr, header.OpCode)
+			log.Printf("[%s] unknown OpCode: %d", self.RemoteAddr, header.OpCode)
 			_, err = io.Copy(ioutil.Discard, rd)
 			if err != nil {
 				log.Printf("[%s] read failed: %v", self.RemoteAddr, err)
