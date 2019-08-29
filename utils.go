@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/globalsign/mgo/bson"
 )
 
 func MustReadInt32(r io.Reader) (n int32) {

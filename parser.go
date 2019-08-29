@@ -181,14 +181,14 @@ func (self *Parser) ParseReply(header MsgHeader, r io.Reader) {
 
 func (self *Parser) ParseMsg(header MsgHeader, r io.Reader) {
 	msg := ReadCString(r)
-	fmt.Printf("%s [%s] MSG %d %s\n", currentTime(), header.RequestID, msg)
+	fmt.Printf("%s [%s] MSG %d %s\n", currentTime(), self.RemoteAddr, header.RequestID, msg)
 }
 func (self *Parser) ParseReserved(header MsgHeader, r io.Reader) {
-	fmt.Printf("%s [%s] RESERVED header:%v data:%s\n", currentTime(), header.RequestID, header)
+	fmt.Printf("%s [%s] RESERVED header:%v data:%v\n", currentTime(), self.RemoteAddr, header.RequestID, ToJson(header))
 }
 
 func (self *Parser) ParseCommandDeprecated(header MsgHeader, r io.Reader) {
-	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	fmt.Printf("%s [%s] MsgHeader %v\n", currentTime(), self.RemoteAddr, ToJson(header))
 	// TODO: no document, current not understand
 	_, err := io.Copy(ioutil.Discard, r)
 	if err != nil {
@@ -197,7 +197,7 @@ func (self *Parser) ParseCommandDeprecated(header MsgHeader, r io.Reader) {
 	}
 }
 func (self *Parser) ParseCommandReplyDeprecated(header MsgHeader, r io.Reader) {
-	fmt.Printf("%s [%s] MsgHeader %#v\n", currentTime(), self.RemoteAddr, header)
+	fmt.Printf("%s [%s] MsgHeader %v\n", currentTime(), self.RemoteAddr, ToJson(header))
 	// TODO: no document, current not understand
 	_, err := io.Copy(ioutil.Discard, r)
 	if err != nil {
@@ -262,6 +262,8 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 				documentSequenceIdentifier,
 				objects,
 			)
+		default:
+			panic("unknown body kind")
 		}
 	}
 }
@@ -333,7 +335,6 @@ func (self *Parser) Parse(r *io.PipeReader) {
 }
 
 func handleConn(conn net.Conn) {
-	log.Printf("[%s] new client connected\n", conn.RemoteAddr())
 	dst, err := net.Dial("tcp", *dstAddr)
 	if err != nil {
 		log.Printf("[%s] unexpected err:%v, close connection:%s\n", conn.RemoteAddr(), err, conn.RemoteAddr())
@@ -341,6 +342,8 @@ func handleConn(conn net.Conn) {
 		return
 	}
 	defer dst.Close()
+	log.Printf("[%s] new client connected: %v -> %v -> %v -> %v\n", conn.RemoteAddr(),
+		conn.RemoteAddr(), conn.LocalAddr(), dst.LocalAddr(), dst.RemoteAddr())
 	parser := NewParser(conn.RemoteAddr().String())
 	parser2 := NewParser(conn.RemoteAddr().String())
 	teeReader := io.TeeReader(conn, parser)
