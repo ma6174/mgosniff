@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -224,16 +226,27 @@ func (self *Parser) ParseCommand(header MsgHeader, r io.Reader) {
 }
 
 func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
-	flags := ToJson(MustReadInt32(r))
+
+	rd := &io.LimitedReader{R: r, N: int64(header.MessageLength - 16)}
+
+	flags := MustReadUint32(rd)
 	fmt.Printf("%s [%s] MSG start id:%v flags: %v\n",
 		currentTime(),
 		self.RemoteAddr,
 		header.RequestID,
-		flags,
+		convertToBin(flags),
 	)
+
+	var crcSize int32 = 0
+	if (flags & 1) == 1 {
+		crcSize = 4
+	}
+
+	var sectionSizes int32 = 0
+
 	for {
-		t := ReadBytes(r, 1)
-		if t == nil {
+
+		if (flags&1) == 1 && rd.N == 4 {
 			fmt.Printf("%s [%s] MSG end id:%v \n",
 				currentTime(),
 				self.RemoteAddr,
@@ -241,20 +254,32 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 			)
 			break
 		}
+
+		t := ReadBytes(rd, 1)
 		switch t[0] {
 		case 0: // body
-			body := ToJson(ReadDocument(r))
+			nBytes, body := ReadDocumentSz(rd)
+
+			sectionSizes += 1 + nBytes
+
+			fmt.Printf("Read: %d - Left: %d\n", 1+nBytes, rd.N)
+
 			fmt.Printf("%s [%s] MSG id:%v type:0 body: %v\n",
 				currentTime(),
 				self.RemoteAddr,
 				header.RequestID,
-				body,
+				ToJson(body),
 			)
 		case 1:
-			sectionSize := MustReadInt32(r)
-			r1 := io.LimitReader(r, int64(sectionSize))
+			ssize := MustReadInt32(rd)
+			r1 := &io.LimitedReader{R: rd, N: int64(ssize-4)}
 			documentSequenceIdentifier := ReadCString(r1)
-			objects := ToJson(ReadDocuments(r1))
+
+			_, bsons := ReadDocumentsSz(r1)
+
+			sectionSizes += ssize + 1
+
+			objects := ToJson(bsons)
 			fmt.Printf("%s [%s] MSG id:%v type:1 documentSequenceIdentifier: %v objects:%v\n",
 				currentTime(),
 				self.RemoteAddr,
@@ -263,8 +288,23 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 				objects,
 			)
 		default:
+			// fmt.Println("unknown body kind -> t:", t)
 			panic("unknown body kind")
 		}
+	}
+
+	// Reading the checksum
+	if flags&1 == 1 {
+		var _ uint32 = MustReadUint32(rd)
+		crcSize = 4
+	}
+
+	bytesRead := 16 + 4 + sectionSizes + crcSize
+
+	if header.MessageLength != bytesRead {
+		panic("header.MessageLength != bytesRead")
+	} else {
+		log.Println("header.MessageLength == bytesRead")
 	}
 }
 
@@ -288,12 +328,21 @@ func (self *Parser) Parse(r *io.PipeReader) {
 		header := MsgHeader{}
 		err := binary.Read(r, binary.LittleEndian, &header)
 		if err != nil {
+
 			if err != io.EOF {
 				log.Printf("[%s] unexpected error:%v\n", self.RemoteAddr, err)
 			}
 			break
 		}
 		rd := io.LimitReader(r, int64(header.MessageLength-4*4))
+		// header + payload
+		reader := bufio.NewReader(rd)
+		var originalmsg bytes.Buffer
+
+		tee := io.TeeReader(reader, &originalmsg)
+
+		rd = tee
+
 		switch header.OpCode {
 		case OP_QUERY:
 			self.ParseQuery(header, rd)

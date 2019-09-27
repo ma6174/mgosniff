@@ -6,10 +6,27 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/globalsign/mgo/bson"
 )
+
+func convertToBin(n uint32) (s string) {
+	s = strconv.FormatUint(uint64(n), 2)
+	for i := len(s); i < 32; i++ {
+		s = "0" + s
+	}
+	return
+}
+
+func MustReadUint32(r io.Reader) (n uint32) {
+	err := binary.Read(r, binary.LittleEndian, &n)
+	if err != nil {
+		panic(err)
+	}
+	return
+}
 
 func MustReadInt32(r io.Reader) (n int32) {
 	err := binary.Read(r, binary.LittleEndian, &n)
@@ -63,40 +80,59 @@ func ReadCString(r io.Reader) string {
 	return string(b)
 }
 
-func ReadOne(r io.Reader) []byte {
+func ReadOne(r io.Reader) (nBytes int32, buf []byte) {
 	docLen, err := ReadInt32(r)
+	fmt.Println("docLen: ", docLen)
 	if err != nil {
 		if err == io.EOF {
-			return nil
+			return 0, nil
 		}
 		panic(err)
 	}
-	buf := make([]byte, int(docLen))
+
+	buf = make([]byte, int(docLen))
 	binary.LittleEndian.PutUint32(buf, uint32(docLen))
-	if _, err := io.ReadFull(r, buf[4:]); err != nil {
+	nb, err := io.ReadFull(r, buf[4:])
+	if err != nil {
 		panic(err)
 	}
-	return buf
+
+	nBytes = int32(nb+4)
+
+	return nBytes, buf
 }
 
-func ReadDocument(r io.Reader) (m bson.M) {
-	if one := ReadOne(r); one != nil {
+func ReadDocumentSz(r io.Reader) (nBytes int32, m bson.M) {
+	if nb, one := ReadOne(r); one != nil {
 		err := bson.Unmarshal(one, &m)
 		if err != nil {
 			panic(err)
 		}
+		nBytes = nb
 	}
-	return m
+
+	return
 }
 
-func ReadDocuments(r io.Reader) (ms []bson.M) {
+func ReadDocument(r io.Reader) (m bson.M) {
+	_, m = ReadDocumentSz(r)
+	return
+}
+
+func ReadDocumentsSz(r io.Reader) (nBytes int32, ms []bson.M) {
 	for {
-		m := ReadDocument(r)
+		nb, m := ReadDocumentSz(r)
 		if m == nil {
 			break
 		}
 		ms = append(ms, m)
+		nBytes += nb
 	}
+	return
+}
+
+func ReadDocuments(r io.Reader) (ms []bson.M) {
+	_, ms = ReadDocumentsSz(r)
 	return
 }
 
