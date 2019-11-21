@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/globalsign/mgo/bson"
 )
 
-func convertToBin(n uint32) (s string) {
-	s = strconv.FormatUint(uint64(n), 2)
-	for i := len(s); i < 32; i++ {
-		s = "0" + s
+func MustReadInt32(r io.Reader) (n int32) {
+	err := binary.Read(r, binary.LittleEndian, &n)
+	if err != nil {
+		panic(err)
 	}
 	return
 }
@@ -28,13 +27,6 @@ func MustReadUint32(r io.Reader) (n uint32) {
 	return
 }
 
-func MustReadInt32(r io.Reader) (n int32) {
-	err := binary.Read(r, binary.LittleEndian, &n)
-	if err != nil {
-		panic(err)
-	}
-	return
-}
 func ReadInt32(r io.Reader) (n int32, err error) {
 	err = binary.Read(r, binary.LittleEndian, &n)
 	return
@@ -80,59 +72,50 @@ func ReadCString(r io.Reader) string {
 	return string(b)
 }
 
-func ReadOne(r io.Reader) (nBytes int32, buf []byte) {
+func ReadOne(r io.Reader) []byte {
 	docLen, err := ReadInt32(r)
-	fmt.Println("docLen: ", docLen)
 	if err != nil {
 		if err == io.EOF {
-			return 0, nil
+			return nil
 		}
 		panic(err)
 	}
-
-	buf = make([]byte, int(docLen))
+	buf := make([]byte, int(docLen))
 	binary.LittleEndian.PutUint32(buf, uint32(docLen))
-	nb, err := io.ReadFull(r, buf[4:])
-	if err != nil {
+	if _, err := io.ReadFull(r, buf[4:]); err != nil {
 		panic(err)
 	}
-
-	nBytes = int32(nb+4)
-
-	return nBytes, buf
+	return buf
 }
 
-func ReadDocumentSz(r io.Reader) (nBytes int32, m bson.M) {
-	if nb, one := ReadOne(r); one != nil {
+func ReadDocument2(r io.Reader) (m bson.M, one []byte) {
+	if one = ReadOne(r); one != nil {
 		err := bson.Unmarshal(one, &m)
 		if err != nil {
 			panic(err)
 		}
-		nBytes = nb
 	}
-
-	return
+	return m, one
 }
 
 func ReadDocument(r io.Reader) (m bson.M) {
-	_, m = ReadDocumentSz(r)
-	return
+	if one := ReadOne(r); one != nil {
+		err := bson.Unmarshal(one, &m)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return m
 }
 
-func ReadDocumentsSz(r io.Reader) (nBytes int32, ms []bson.M) {
+func ReadDocuments(r io.Reader) (ms []bson.M) {
 	for {
-		nb, m := ReadDocumentSz(r)
+		m := ReadDocument(r)
 		if m == nil {
 			break
 		}
 		ms = append(ms, m)
-		nBytes += nb
 	}
-	return
-}
-
-func ReadDocuments(r io.Reader) (ms []bson.M) {
-	_, ms = ReadDocumentsSz(r)
 	return
 }
 
