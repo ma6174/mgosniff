@@ -244,11 +244,13 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 		switch t[0] {
 		case 0: // body
 			body := ToJson(ReadDocument(r))
-			fmt.Printf("%s [%s] MSG id:%v type:0 body: %v\n",
+			checksum, _ := ReadInt32(r)
+			fmt.Printf("%s [%s] MSG id:%v type:0 body: %v checksum:%v\n",
 				currentTime(),
 				self.RemoteAddr,
 				header.RequestID,
 				body,
+				checksum,
 			)
 		case 1:
 			sectionSize := MustReadInt32(r)
@@ -263,7 +265,7 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 				objects,
 			)
 		default:
-			panic("unknown body kind")
+			log.Panic(fmt.Sprint("unknown body kind:", t[0]))
 		}
 	}
 }
