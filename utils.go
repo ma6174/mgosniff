@@ -23,6 +23,11 @@ func ReadInt32(r io.Reader) (n int32, err error) {
 	return
 }
 
+func ReadUint32(r io.Reader) (n uint32, err error) {
+	err = binary.Read(r, binary.LittleEndian, &n)
+	return
+}
+
 func ReadInt64(r io.Reader) *int64 {
 	var n int64
 	err := binary.Read(r, binary.LittleEndian, &n)

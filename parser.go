@@ -244,7 +244,7 @@ func (self *Parser) ParseMsgNew(header MsgHeader, r io.Reader) {
 		switch t[0] {
 		case 0: // body
 			body := ToJson(ReadDocument(r))
-			checksum, _ := ReadInt32(r)
+			checksum, _ := ReadUint32(r)
 			fmt.Printf("%s [%s] MSG id:%v type:0 body: %v checksum:%v\n",
 				currentTime(),
 				self.RemoteAddr,
